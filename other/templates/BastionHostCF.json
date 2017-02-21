@@ -1,0 +1,108 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : " Bastion Host under Auto Scaling Group",
+
+  "Parameters" : {
+
+    "KeyName" : {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instances",
+      "Type" : "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    }
+  },
+
+  "Resources" : {
+
+    "RootRole": {
+         "Type": "AWS::IAM::Role",
+         "Properties": {
+            "AssumeRolePolicyDocument": {
+               "Version" : "2012-10-17",
+               "Statement": [ {
+                  "Effect": "Allow",
+                  "Principal": {
+                     "Service": [ "ec2.amazonaws.com" ]
+                  },
+                  "Action": [ "sts:AssumeRole" ]
+               } ]
+            },
+            "Path": "/"
+         }
+     },
+
+      "RolePolicies": {
+         "Type": "AWS::IAM::Policy",
+         "Properties": {
+            "PolicyName": "root",
+            "PolicyDocument": {
+               "Version" : "2012-10-17",
+               "Statement": [ {
+                  "Effect": "Allow",
+                  "Action": "*",
+                  "Resource": "*"
+               } ]
+            },
+            "Roles": [ { "Ref": "RootRole" } ]
+         
+      },
+
+      "RootInstanceProfile": {
+         "Type": "AWS::IAM::InstanceProfile",
+         "Properties": {
+            "Path": "/",
+            "Roles": [ { "Ref": "RootRole" } ]
+         }
+      },
+
+    "BastionHostSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+         "GroupDescription" : "allow SSH connections",
+         "SecurityGroupIngress" : [
+             {
+                 "IpProtocol" : "tcp",
+                 "FromPort" : "22",
+                 "ToPort" : "22",
+                 "CidrIp" : "0.0.0.0/0"
+             }
+         ]
+      }
+    },
+
+    "BastionHostLaunchConfiguration" : {
+       "Type" : "AWS::AutoScaling::LaunchConfiguration",
+       "Properties" : {
+          "ImageId" : "ami-1ecae776",
+          "SecurityGroups" : [ { "Ref" : "BastionHostSecurityGroup" } ],
+          "InstanceType" : "t2.micro",
+          "BlockDeviceMappings" : [ {
+                "DeviceName" : "/dev/xvda",
+                "Ebs" : {"VolumeSize" : "8"}
+             } ],
+          "IamInstanceProfile" : { "Ref" : "RootInstanceProfile" },
+          "UserData" : { "Fn::Base64" : { "Fn::Join" : ["", [
+              "#!/bin/bash\n",
+              "aws ec2 associate-address ",
+              "         --instance-id $(curl http://169.254.169.254/latest/meta-data/instance-id)",
+              "         --public-ip 52.6.49.71",
+              "         --region us-east-1", "\n"
+            ]]}},
+          "KeyName" : { "Ref" : "KeyName" }
+       }
+    },
+
+    "BastionHostAutoScalingGroup" : {
+       "Type" : "AWS::AutoScaling::AutoScalingGroup",
+       "Properties" : {
+          "AvailabilityZones" : { "Fn::GetAZs" : ""},
+          "LaunchConfigurationName" : { "Ref" : "BastionHostLaunchConfiguration" },
+          "MinSize" : "1",
+          "MaxSize" : "1",
+          "Cooldown" : "30",
+          "HealthCheckGracePeriod" : 30
+       }
+    }
+
+  }
+}
